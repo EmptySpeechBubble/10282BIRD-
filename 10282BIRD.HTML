@@ -1362,10 +1362,16 @@ function checkOwlWindChimeDelivery() {
             // Override the owl's update method to make it drop the wind chimes
             const originalUpdate = owl.update;
             owl.update = function(deltaTime) {
-                // If in middle of screen, drop the wind chimes
-                if (!windChimeOwlDelivered &&
-                    this.x > canvas.width * 0.4 &&
-                    this.x < canvas.width * 0.6) {
+                // V40 FIX: Slow down delivery owl to ensure drop happens
+                if (this.isDeliveringChimes && this.x > canvas.width * 0.3 && this.x < canvas.width * 0.7) {
+                    // Slow down in drop zone
+                    this.velocity.x *= 0.7;
+                }
+
+                // V40 FIX: Wider drop window (30%-70% of screen instead of 40%-60%)
+                if (this.isDeliveringChimes &&
+                    this.x > canvas.width * 0.35 &&
+                    this.x < canvas.width * 0.65) {
 
                     // Find a random tree to hang the wind chimes on
                     const randomTree = trees[Math.floor(Math.random() * trees.length)];
@@ -1401,7 +1407,7 @@ function checkOwlWindChimeDelivery() {
                         }
                     }
 
-                    debugLog(`Owl delivered wind chimes to tree at (${randomTree.x})`);
+                    debugLog(`Owl delivered wind chimes to tree at (${randomTree.x}) at position (${this.x}, ${this.y})`);
                 }
 
                 // Call original update
@@ -6668,26 +6674,26 @@ function resetStuckBirds() {
         );
 
         if (nearbyTree && bird.stuckTime > 500) { // Increased threshold for tree-related stuckness
-            // Apply gentle push away from the tree
+            // V40 FIX: Stronger push away from tree to prevent repeated sticking
             const dirX = bird.x < nearbyTree.x ? -1 : 1;
-            bird.applyForce({ 
-                x: dirX * 0.08, // Reduced from 0.2
-                y: -0.04 // Reduced from -0.1
+            bird.applyForce({
+                x: dirX * 0.15, // Increased from 0.08 for stronger push
+                y: -0.08 // Increased from -0.04 for more upward movement
             });
-            
+
             // Only reset state if clearly stuck
             if (bird.stuckTime > 800) {
                 bird.state = BIRD_STATES.FLYING;
                 bird.stateTimer = 0;
-                
-                // Generate a path away from the tree
-                const targetX = bird.x + dirX * 80; // Reduced from 100
-                const targetY = bird.y - 30; // Reduced from 50
+
+                // V40 FIX: Generate path MUCH farther away to prevent immediate return
+                const targetX = bird.x + dirX * 200; // Increased from 80
+                const targetY = bird.y - 80; // Increased from 30
                 bird.generatePath(targetX, targetY);
-                
+
                 bird.stuckTime = 0;
                 stuckBirdsFixed++;
-                debugLog(`Gentle push for bird stuck near tree at (${bird.x}, ${bird.y})`);
+                debugLog(`Gentle push for bird stuck near tree at (${bird.x}, ${bird.y}) - sending to (${targetX}, ${targetY})`);
             }
         }
         
@@ -9267,19 +9273,21 @@ if ((isRaining || timeOfDay >= 1) && Math.random() < 0.4) { // 40% chance to see
 
 
                             // Check for baby birds more frequently when perched
-    if (!this.isWild && babyBirds.length > 0 && Math.random() < 0.008) { // 0.8% chance per frame (~2.5% per second)
+                            // V40 FIX: Only check after minimum perch time to prevent instant exits
+    if (!this.isWild && babyBirds.length > 0 && this.stateTimer > 5000 && Math.random() < 0.008) { // After 5 seconds perched
         // Look for very hungry babies (over 120 seconds without food)
-        let veryHungryBaby = babyBirds.find(baby => 
-            baby.timeSinceLastMeal > 120 && 
+        let veryHungryBaby = babyBirds.find(baby =>
+            baby.timeSinceLastMeal > 120 &&
             (baby.associatedNest === this.myNest || !baby.associatedNest)
         );
-        
+
         if (veryHungryBaby) {
             // Leave perch immediately to feed baby
             this.state = BIRD_STATES.FLYING;
             this.stateTimer = 0;
             this.perchTarget = null;
             this.findBabyBirds();
+            debugLog(`${getBirdName(this)} leaving perch to feed VERY hungry baby`);
             break;
         }
     }
@@ -9328,24 +9336,27 @@ if ((isRaining || timeOfDay >= 1) && Math.random() < 0.4) { // 40% chance to see
                             }
 
                             // Check for baby birds while perched if bird has a nest with babies
-                            if (!this.isWild && this.myNest && babyBirds.length > 0 && Math.random() < 0.1) {
-                                // More frequent checks (increased from 0.08 to 0.1)
+                            // V40 FIX: Only check after minimum perch time and reduce frequency
+                            if (!this.isWild && this.myNest && babyBirds.length > 0 && this.stateTimer > 10000 && Math.random() < 0.001) {
+                                // Check after 10 seconds perched, 0.1% chance per frame (~6% per second)
                                 // Check if there are hungry babies in this bird's nest
-                                let hungryBaby = babyBirds.find(baby => 
-                                    baby.associatedNest === this.myNest && 
+                                let hungryBaby = babyBirds.find(baby =>
+                                    baby.associatedNest === this.myNest &&
                                     baby.timeSinceLastMeal > 20 // Reduced threshold from 40
                                 );
-                                
+
                                 if (hungryBaby) {
                                     this.findBabyBirds();
+                                    debugLog(`${getBirdName(this)} leaving perch to feed hungry baby`);
                                     break;
                                 }
                             }
 
                             // Leave perch after a while or if hungry
-                            // NEW: Transition to sleeping at night
+                            // NEW: Transition to sleeping at night (only after being perched for a while)
                             const isNightTime = timeOfDay >= 1;
-                            if (isNightTime && Math.random() < 0.05) { // 5% chance to fall asleep at night
+                            if (isNightTime && this.stateTimer > 30000 && Math.random() < 0.0005) {
+                                // After 30 seconds perched, 0.05% chance per frame (~3% per second)
                                 this.state = BIRD_STATES.SLEEPING;
                                 this.stateTimer = 0;
                                 debugLog(`${getBirdName(this)} fell asleep on perch`);
@@ -9353,12 +9364,13 @@ if ((isRaining || timeOfDay >= 1) && Math.random() < 0.4) { // 40% chance to see
                             }
 
                             // PRIORITY: Check for player-added food FIRST (even when not hungry)
+                            // V40 FIX: Only check after minimum perch time (3 seconds) so birds settle first
                             const playerFoodFromPerch = foodItems.find(f => f.playerAdded &&
                                 distance(this.x, this.y, f.x, f.y) < 400 &&
                                 !this.isDangerZone(f.x, f.y));
 
-                            if (playerFoodFromPerch && Math.random() < 0.80) {
-                                // 80% chance to leave perch for player food even when not hungry
+                            if (playerFoodFromPerch && this.stateTimer > 3000 && Math.random() < 0.80) {
+                                // 80% chance to leave perch for player food after 3 seconds settled
                                 this.target = {
                                     type: 'food',
                                     food: playerFoodFromPerch,
@@ -10135,22 +10147,28 @@ if ((isRaining || timeOfDay >= 1) && Math.random() < 0.4) { // 40% chance to see
 
                         // Wake up if:
                         // 1. It becomes daytime
-                        // 2. State timer exceeds duration (30-60 seconds with variation)
+                        // 2. State timer exceeds duration
                         // 3. Very hungry
                         // 4. Danger nearby
+                        // 5. V40 FIX: Rain or thunder (weather disturbance)
                         const isDaytime = timeOfDay < 1;
                         const nearbyDanger = rats.some(rat => distance(rat.x, rat.y, this.x, this.y) < 100) ||
                                            owls.some(owl => distance(owl.x, owl.y, this.x, this.y) < 150);
+                        const weatherDisturbance = isRaining || isThundering;
 
                         if (isDaytime ||
                             this.stateTimer > BIRD_STATE_DURATION.SLEEPING ||
                             this.hunger > HUNGER_CRITICAL_THRESHOLD ||
-                            nearbyDanger) {
+                            nearbyDanger ||
+                            weatherDisturbance) {
 
                             // Wake up and return to perching
                             this.state = BIRD_STATES.PERCHED;
                             this.stateTimer = 0;
-                            debugLog(`${getBirdName(this)} woke up from sleep`);
+                            const wakeReason = weatherDisturbance ? ' (disturbed by weather)' :
+                                             nearbyDanger ? ' (danger nearby)' :
+                                             isDaytime ? ' (dawn)' : '';
+                            debugLog(`${getBirdName(this)} woke up from sleep${wakeReason}`);
 
                             // If no perch target, find one
                             if (!this.perchTarget) {
@@ -10670,24 +10688,38 @@ if (this.pathIndex >= this.path.length) {
     if (this.stateTimer < BIRD_STATE_DURATION.HOPPING) {
         // Initialize hopping properties if not present
         if (!this.hopData) {
+            // V40 FIX: Check if food nearby for faster, more excited hopping
+            const nearbyFood = foodItems.find(f => distance(this.x, this.y, f.x, f.y) < 80);
+            const isExcited = nearbyFood !== undefined;
+
+            // V40 FIX: Random hop sequence type (single, double, triple)
+            const sequenceType = Math.random();
+            let hopSequence = 1; // Default: single hop
+            if (sequenceType < 0.3) hopSequence = 2; // 30% - double hop
+            else if (sequenceType < 0.45) hopSequence = 3; // 15% - triple hop
+
             // Set up structured hopping with enforced ground time
             this.hopData = {
                 phase: "ground",         // "ground" or "hop"
                 phaseTimer: 0,           // Time in current phase
                 hopHeight: 0,            // Current height of hop
-                nextHopDelay: 2000,      // Time between hops (2 seconds)
+                nextHopDelay: isExcited ? 600 : 2000, // Faster hopping near food
                 baseY: hoppingGroundY,   // Store exact ground level
                 hopDistance: 0,          // Distance to move in this hop
                 lastX: this.x,           // Track position to detect external changes
                 headBobTimer: 0,         // Timer for head bob animation
-                lookAroundTimer: 0       // Timer for looking around behavior
+                lookAroundTimer: 0,      // Timer for looking around behavior
+                hopSequence: hopSequence,  // Number of quick hops in sequence
+                hopsRemaining: hopSequence, // Track remaining hops
+                isExcited: isExcited     // Excited state near food
             };
 
             // Force initial position
             this.y = hoppingGroundY;
             this.velocity.y = 0;
 
-            debugLog("HOPPING STATE INITIALIZED - forcing ground position");
+            const sequenceDesc = hopSequence > 1 ? ` (${hopSequence}-hop sequence)` : '';
+            debugLog(`HOPPING STATE INITIALIZED - forcing ground position${sequenceDesc}`);
         }
         
         // Update phase timer
@@ -10738,20 +10770,36 @@ if (this.pathIndex >= this.path.length) {
                 // Transition to hop phase
                 this.hopData.phase = "hop";
                 this.hopData.phaseTimer = 0;
-                this.hopData.maxHopHeight = 15 + Math.random() * 10; // 8-12px hop height
-                this.hopData.hopDuration = 500; // 0.5 second hop
-                
+
+                // V40 FIX: Varied hop heights based on sequence and excitement
+                let hopHeightMultiplier = 1.0;
+                if (this.hopData.hopSequence > 1) {
+                    // Quick hops in sequence are smaller
+                    hopHeightMultiplier = 0.7;
+                }
+                if (this.hopData.isExcited) {
+                    // Excited hops are slightly higher
+                    hopHeightMultiplier *= 1.2;
+                }
+
+                // Random hop height with variation
+                const baseHeight = 12 + Math.random() * 15; // 12-27px range
+                this.hopData.maxHopHeight = baseHeight * hopHeightMultiplier;
+                this.hopData.hopDuration = this.hopData.isExcited ? 350 : 500; // Faster when excited
+
                 // Determine hop direction and distance
                 if (Math.random() < 0.2) {
                     this.direction *= -1;
                 }
-                
-                // Set distance to hop - small horizontal movement
-                this.hopData.hopDistance = this.direction * (10 + Math.random() * 15);
-                
+
+                // Set distance to hop - varies by sequence type
+                const baseDistance = this.hopData.isExcited ? 8 : 12; // Smaller hops when excited
+                const distanceVariation = Math.random() * 12;
+                this.hopData.hopDistance = this.direction * (baseDistance + distanceVariation);
+
                 this.pecking = false; // Stop pecking during hop
-                
-                debugLog(`Bird starting hop with height ${this.hopData.maxHopHeight}px`);
+
+                debugLog(`Bird starting hop (${this.hopData.hopsRemaining}/${this.hopData.hopSequence}) height ${Math.round(this.hopData.maxHopHeight)}px`);
             }
         } else if (this.hopData.phase === "hop") {
             // In hop phase - follow a precise arc
@@ -10769,20 +10817,45 @@ if (this.pathIndex >= this.path.length) {
 
             // Remember position to prevent external interference
             if (hopProgress >= 1) {
-                // Hop complete - back to ground
-                this.hopData.phase = "ground";
-                this.hopData.phaseTimer = 0;
-                this.hopData.lastX = this.x;
-                this.hopData.nextHopDelay = 1500 + Math.random() * 1500; // 1.5-3s ground time (increased from 0.8-1.6s)
+                // Hop complete - check if more hops in sequence
+                this.hopData.hopsRemaining--;
 
-                // Force ground position to prevent any drift
-                this.y = hoppingGroundY;
-                this.velocity.y = 0;
-                
-                // Start pecking again
-                this.pecking = true;
-                
-                debugLog("Bird finished hop, returning to ground");
+                if (this.hopData.hopsRemaining > 0) {
+                    // V40 FIX: More hops in sequence - quick transition
+                    this.hopData.phase = "ground";
+                    this.hopData.phaseTimer = 0;
+                    this.hopData.lastX = this.x;
+                    this.hopData.nextHopDelay = 300 + Math.random() * 200; // Very short delay (0.3-0.5s) for rapid hops
+
+                    this.y = hoppingGroundY;
+                    this.velocity.y = 0;
+                    this.pecking = false; // No pecking during rapid sequence
+
+                    debugLog(`Bird finished hop, ${this.hopData.hopsRemaining} more in sequence`);
+                } else {
+                    // Sequence complete - normal ground time
+                    this.hopData.phase = "ground";
+                    this.hopData.phaseTimer = 0;
+                    this.hopData.lastX = this.x;
+                    this.hopData.nextHopDelay = this.hopData.isExcited ? 800 : (1500 + Math.random() * 1500); // Faster when excited
+
+                    // Force ground position to prevent any drift
+                    this.y = hoppingGroundY;
+                    this.velocity.y = 0;
+
+                    // Start pecking again
+                    this.pecking = true;
+
+                    // Reset hop sequence
+                    const sequenceType = Math.random();
+                    let hopSequence = 1;
+                    if (sequenceType < 0.3) hopSequence = 2;
+                    else if (sequenceType < 0.45) hopSequence = 3;
+                    this.hopData.hopSequence = hopSequence;
+                    this.hopData.hopsRemaining = hopSequence;
+
+                    debugLog("Bird finished hop sequence, returning to ground");
+                }
             }
         }
         
@@ -10831,15 +10904,55 @@ if (this.pathIndex >= this.path.length) {
     // V40: Only exit hopping after FULL duration (no early exits for maximum chill)
     if (this.stateTimer > BIRD_STATE_DURATION.HOPPING && (!this.hopData || this.hopData.phase === "ground")) {
         // ONLY exit when on ground AND full time elapsed
-        // Exit to flying or perching (don't reset timer - let it naturally end)
-        if (Math.random() < 0.8) { // Increased from 0.7 - more likely to perch after hopping
+        // V40 FIX: Add transitions to other calm ground states
+        const transitionRoll = Math.random();
+
+        if (transitionRoll < 0.4) {
+            // 40% - Perch (most common after hopping)
             this.findPerch();
-            this.hopData = null; // Clear hop data
-        } else {
-            this.state = BIRD_STATES.RESTING; // Rest instead of IDLE for smoother transition
+            this.hopData = null;
+            debugLog("Bird finished hopping, going to perch");
+        } else if (transitionRoll < 0.6) {
+            // 20% - Rest on ground
+            this.state = BIRD_STATES.RESTING;
             this.stateTimer = 0;
-            this.hopData = null; // Clear hop data
-            debugLog("Bird finished hopping, now resting");
+            this.hopData = null;
+            debugLog("Bird finished hopping, now resting on ground");
+        } else if (transitionRoll < 0.75 && foodItems.length > 0) {
+            // 15% - Peck for food (if food exists)
+            const nearbyFood = foodItems.find(f => distance(this.x, this.y, f.x, f.y) < 100);
+            if (nearbyFood) {
+                this.state = BIRD_STATES.PECKING;
+                this.target = { type: 'food', food: nearbyFood, x: nearbyFood.x, y: nearbyFood.y };
+                this.stateTimer = 0;
+                this.hopData = null;
+                debugLog("Bird finished hopping, now pecking for food");
+            } else {
+                this.state = BIRD_STATES.RESTING;
+                this.stateTimer = 0;
+                this.hopData = null;
+            }
+        } else if (transitionRoll < 0.85 && puddles.length > 0) {
+            // 10% - Bathe (if puddles exist)
+            const nearbyPuddle = puddles.find(p => distance(this.x, this.y, p.x, p.y) < 120);
+            if (nearbyPuddle) {
+                this.state = BIRD_STATES.BATHING;
+                this.target = { type: 'puddle', puddle: nearbyPuddle, x: nearbyPuddle.x, y: nearbyPuddle.y };
+                this.stateTimer = 0;
+                this.hopData = null;
+                debugLog("Bird finished hopping, going to bathe");
+            } else {
+                this.state = BIRD_STATES.RESTING;
+                this.stateTimer = 0;
+                this.hopData = null;
+            }
+        } else {
+            // 15% - Fly away
+            this.state = BIRD_STATES.FLYING;
+            this.stateTimer = 0;
+            this.hopData = null;
+            this.generatePath(Math.random() * canvas.width, 100 + Math.random() * (canvas.height * 0.3));
+            debugLog("Bird finished hopping, flying away");
         }
     }
     break;
@@ -11045,30 +11158,45 @@ if (this.pathIndex >= this.path.length) {
             draw() {
                 const sizeMultiplier = this.birdType.sizeMultiplier;
                 
-                // Determine if wings should be flapping based on state
-                const isFlapping = 
-                    this.state === BIRD_STATES.FLYING || 
-                    this.state === BIRD_STATES.FLEEING || 
-                    Math.abs(this.velocity.x) > 0.5 || 
-                    Math.abs(this.velocity.y) > 0.5;
-                
-                // // Calculate position adjustments for flapping/gliding/hopping motion
+                // V40 FIX: Improved wing state detection for gliding visual
+                // Determine if wings should be actively flapping or gliding
+                const isActivelyFlapping =
+                    this.state === BIRD_STATES.FLYING ||
+                    this.state === BIRD_STATES.FLEEING ||
+                    (Math.abs(this.velocity.x) > 1.5 || Math.abs(this.velocity.y) > 1.5);
+
+                // Detect gliding: moving through air but not actively flapping
+                const isGliding =
+                    !isActivelyFlapping &&
+                    (Math.abs(this.velocity.x) > 0.3 || Math.abs(this.velocity.y) > 0.3) &&
+                    this.y < canvas.height * GROUND_HEIGHT_RATIO - 20; // Above ground
+
+                // Calculate position adjustments for flapping/gliding/hopping motion
     let yOffset;
-    
+
     if (this.state === BIRD_STATES.HOPPING) {
         // Hopping creates a bouncy motion - more pronounced up and down
         yOffset = Math.abs(Math.sin(this.wingFlap * 1.5)) * 3;
     } else {
         // Regular flight bobbing
-        yOffset = Math.sin(this.wingFlap * 0.5) * (isFlapping ? 1.5 : 0.3); // Increased from 1.0/0.2
+        yOffset = Math.sin(this.wingFlap * 0.5) * (isActivelyFlapping ? 1.5 : 0.3);
     }
-                
-                // Wing position and spread - adjusted for more visibility
-                const wingSpread = isFlapping ? 
-                    Math.abs(Math.sin(this.wingFlap)) * this.birdType.wingFlapAmplitude * 1.2 : // Increased by 20%
-                    this.birdType.glideRatio * 1.2; // Increased by 20%
-                    
-                const wingY = isFlapping ? Math.cos(this.wingFlap) * 5 : 0; // Increased from 2 to 3
+
+                // Wing position and spread - three states: flapping, gliding, folded
+                let wingSpread, wingY;
+                if (isActivelyFlapping) {
+                    // Active flapping - animated wings
+                    wingSpread = Math.abs(Math.sin(this.wingFlap)) * this.birdType.wingFlapAmplitude * 1.2;
+                    wingY = Math.cos(this.wingFlap) * 5;
+                } else if (isGliding) {
+                    // Gliding - wings extended but static
+                    wingSpread = this.birdType.wingFlapAmplitude * 0.9; // 90% extended for glide
+                    wingY = 2; // Slightly raised wing position
+                } else {
+                    // Folded wings - perched or resting
+                    wingSpread = this.birdType.glideRatio * 1.2;
+                    wingY = 0;
+                }
                 
                 // Draw body
                  // Use rare variant colors if present, otherwise normal colors
