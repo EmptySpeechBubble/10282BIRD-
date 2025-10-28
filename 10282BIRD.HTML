@@ -9240,7 +9240,8 @@ if ((isRaining || timeOfDay >= 1) && Math.random() < 0.4) { // 40% chance to see
 
                     case BIRD_STATES.PERCHED:
                         // V26: Check nest condition periodically when perched
-                        if (Math.random() < 0.03) {
+                        // V40 FIX: Only check after minimum perch time (3 seconds)
+                        if (this.stateTimer > 3000 && Math.random() < 0.03) {
                             if (this.checkNestCondition()) {
                                 // Will transition to maintenance mode if needed
                                 break;
@@ -9323,16 +9324,19 @@ if ((isRaining || timeOfDay >= 1) && Math.random() < 0.4) { // 40% chance to see
                             }
                             
                             // Check if there are squirrels nearby
-                            const nearbySquirrel = squirrels.find(squirrel => 
-                                squirrel.climbingTree === this.perchTarget.tree &&
-                                distance(squirrel.x, squirrel.y, this.x, this.y) < 60
-                            );
-                            
-                            if (nearbySquirrel) {
-                                // Flee from squirrel
-                                this.flee(nearbySquirrel.x, nearbySquirrel.y);
-                                debugLog(`Bird fleeing from squirrel in tree!`);
-                                break;
+                            // V40 FIX: Allow minimum perch time even with squirrels (birds need to settle first)
+                            if (this.stateTimer > 2000) { // Only check after 2 seconds perched
+                                const nearbySquirrel = squirrels.find(squirrel =>
+                                    squirrel.climbingTree === this.perchTarget.tree &&
+                                    distance(squirrel.x, squirrel.y, this.x, this.y) < 60
+                                );
+
+                                if (nearbySquirrel) {
+                                    // Flee from squirrel
+                                    this.flee(nearbySquirrel.x, nearbySquirrel.y);
+                                    debugLog(`Bird fleeing from squirrel in tree!`);
+                                    break;
+                                }
                             }
 
                             // Check for baby birds while perched if bird has a nest with babies
